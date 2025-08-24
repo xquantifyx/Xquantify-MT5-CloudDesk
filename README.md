@@ -12,9 +12,9 @@ Author: **Xquantify** — https://www.xquantify.com — Telegram: @xquantify
 - Optional **`--broker <name>`** — cache installers per broker (`mt5_<name>.exe`)
 - Pulls prebuilt image from GHCR (fast), falls back to base image + auto Wine install
 - Auto-fixes Chrome apt GPG repo issues (host + container)
-- Desktop shortcuts are **trusted** (no “execute text file?” dialog)
+- Desktop shortcuts are **trusted** (no “execute text file?” dialog) and LXDE auto-launch is enabled
 - MT5 **autostarts** on desktop login
-- Detailed end-of-install **summary** (VNC URL/ports/password, dirs, container)
+- Detailed end‑of‑install **summary** (VNC URL/ports/password, dirs, container)
 
 ---
 
@@ -63,7 +63,7 @@ sudo ./install_mt5_headless.sh --choice bybit --broker bybit
 # Remove container only
 sudo ./install_mt5_headless.sh --uninstall --yes
 
-# Full purge: container + data + downloads + images
+# Full purge: container + data + downloads + images + BASE_DIR
 sudo ./install_mt5_headless.sh --purge-all --yes
 ```
 
@@ -92,8 +92,8 @@ sudo ufw allow 5901/tcp   # VNC
 ---
 
 ## 🩺 Troubleshooting
-- **GPG/Chrome apt errors**: script will auto-disable the invalid repo on host & container.
-- **noVNC page opens but icon prompts “execute text file?”** → already handled by trusting `.desktop` via `gio`.
+- **GPG/Chrome apt errors**: script will auto‑disable the invalid repo on host & container.
+- **noVNC page opens but icon prompts “execute text file?”** → already handled by trusting `.desktop` via `gio` and LXDE config.
 - **Direct GitHub link downloads HTML** → you used a `blob` link. Use **raw.githubusercontent.com** or a **Releases** link.
 
 ---
