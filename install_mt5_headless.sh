@@ -143,27 +143,56 @@ start_docker_daemon() {
 # randomize VNC pass if default
 if [[ "$VNC_PASS" == "mt5VNCpass" ]]; then VNC_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12 || true)"; [[ -z "$VNC_PASS" ]] && VNC_PASS="Xq$(date +%s)"; echo "[=] Generated VNC password: $VNC_PASS"; fi
 
-# uninstall path
+# ===================== UNINSTALL / PURGE =====================
 if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
   [[ "$PURGE_ALL" == "1" ]] && PURGE_DATA="1" PURGE_DOWNLOADS="1" PURGE_IMAGES="1" ASSUME_YES="1"
-  echo "[*] Uninstalling..."
+  echo "[*] Starting uninstall process..."
+
+  # Container
   if command -v docker >/dev/null 2>&1; then
-    docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+      echo "   - Removing Docker container: ${CONTAINER_NAME}"
+      docker rm -f "${CONTAINER_NAME}" || echo "     (not found or already removed)"
+    else
+      echo "   - Container ${CONTAINER_NAME} not found, skipping"
+    fi
+
+    # Images
     if [[ "$PURGE_IMAGES" == "1" ]]; then
-      if confirm "Remove Docker images (preferred + fallback)?"; then
-        docker rmi "${PREFERRED_IMAGE}" >/dev/null 2>&1 || true
-        docker rmi "${FALLBACK_IMAGE}"  >/dev/null 2>&1 || true
+      echo "   - Removing Docker images:"
+      echo "     > $PREFERRED_IMAGE"; docker rmi "$PREFERRED_IMAGE" >/dev/null 2>&1 || echo "       (image not present)"
+      echo "     > $FALLBACK_IMAGE";  docker rmi "$FALLBACK_IMAGE"  >/dev/null 2>&1 || echo "       (image not present)"
+    fi
+  fi
+
+  # Paths
+  if [[ "$PURGE_ALL" == "1" ]]; then
+    echo "   - Deleting base directory: $BASE_DIR"
+    ls -lah "$BASE_DIR" 2>/dev/null || echo "     (directory not found)"
+    rm -rf "$BASE_DIR" || true
+    echo "   - Removing dockerd log (if any): $DOCKERD_LOG"
+    rm -f "$DOCKERD_LOG" || true
+  else
+    if [[ "$PURGE_DATA" == "1" ]]; then
+      if [[ -d "$DATA_DIR" ]]; then
+        echo "   - Deleting data dir: $DATA_DIR"; ls -lah "$DATA_DIR" || true; rm -rf "$DATA_DIR"
+      else
+        echo "   - Data dir not found: $DATA_DIR"
+      fi
+    fi
+    if [[ "$PURGE_DOWNLOADS" == "1" ]]; then
+      if [[ -d "$DOWNLOAD_DIR" ]]; then
+        echo "   - Deleting download cache: $DOWNLOAD_DIR"; ls -lah "$DOWNLOAD_DIR" || true; rm -rf "$DOWNLOAD_DIR"
+      else
+        echo "   - Download dir not found: $DOWNLOAD_DIR"
       fi
     fi
   fi
-  if [[ "$PURGE_ALL" == "1" ]]; then
-    echo "[*] Removing entire $BASE_DIR ..."; rm -rf "$BASE_DIR" 2>/dev/null || true; rm -f "$DOCKERD_LOG" 2>/dev/null || true
-  else
-    [[ "$PURGE_DATA" == "1" && -d "$DATA_DIR" ]] && rm -rf "$DATA_DIR"
-    [[ "$PURGE_DOWNLOADS" == "1" && -d "$DOWNLOAD_DIR" ]] && rm -rf "$DOWNLOAD_DIR"
-  fi
-  echo "[DONE]"; exit 0
+
+  echo "[DONE] Uninstall and cleanup complete."
+  exit 0
 fi
+# =================== END UNINSTALL / PURGE ===================
 
 # host apt fixes
 echo "[*] Checking apt sources on host..."
@@ -237,7 +266,7 @@ dpkg --add-architecture i386
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   wine64 wine32 winbind cabextract wget xvfb xauth x11-xserver-utils winetricks \
-  ca-certificates fonts-wqy-zenhei fonts-noto-cjk libglib2.0-bin
+  ca-certificates fonts-wqy-zenhei fonts-noto-cjk
 "
 else
   echo "[=] Wine already preinstalled."
@@ -275,9 +304,15 @@ Terminal=false
 Categories=Utility;
 EOF
 chmod +x /root/Desktop/'Install MT5 (Debug).desktop'
-gio set /root/Desktop/'Install MT5 (Debug).desktop' metadata::trusted true || true
+
+# PCManFM & libfm: auto-exec .desktop (no prompt)
 mkdir -p /root/.config/pcmanfm/LXDE
-echo -e '[Desktop]\nlaunch_desktop_file=1' > /root/.config/pcmanfm/LXDE/pcmanfm.conf
+printf '[Desktop]\nlaunch_desktop_file=1\n' > /root/.config/pcmanfm/LXDE/pcmanfm.conf
+mkdir -p /etc/xdg/libfm /root/.config/libfm
+printf '[config]\nquick_exec=1\n' > /etc/xdg/libfm/libfm.conf
+printf '[config]\nquick_exec=1\n' > /root/.config/libfm/libfm.conf
+killall pcmanfm >/dev/null 2>&1 || true
+pcmanfm --daemon &>/dev/null &
 "
 else
   echo "[=] Installing MT5 silently..."
@@ -304,11 +339,17 @@ Terminal=false
 Categories=Finance;
 EOF
 chmod +x /root/Desktop/MetaTrader5.desktop
-gio set /root/Desktop/MetaTrader5.desktop metadata::trusted true || true
+
+# PCManFM & libfm: auto-exec .desktop (no prompt)
 mkdir -p /etc/xdg/lxsession/LXDE
 grep -q '/usr/local/bin/mt5' /etc/xdg/lxsession/LXDE/autostart 2>/dev/null || echo '@/usr/local/bin/mt5' >> /etc/xdg/lxsession/LXDE/autostart
 mkdir -p /root/.config/pcmanfm/LXDE
-echo -e '[Desktop]\nlaunch_desktop_file=1' > /root/.config/pcmanfm/LXDE/pcmanfm.conf
+printf '[Desktop]\nlaunch_desktop_file=1\n' > /root/.config/pcmanfm/LXDE/pcmanfm.conf
+mkdir -p /etc/xdg/libfm /root/.config/libfm
+printf '[config]\nquick_exec=1\n' > /etc/xdg/libfm/libfm.conf
+printf '[config]\nquick_exec=1\n' > /root/.config/libfm/libfm.conf
+killall pcmanfm >/dev/null 2>&1 || true
+pcmanfm --daemon &>/dev/null &
 "
 fi
 
