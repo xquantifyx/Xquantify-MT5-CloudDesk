@@ -24,7 +24,7 @@ Includes Postgres, `.env` config, GitHub Actions CI, and a step‑by‑step Ubun
 
 ```bash
 # 1) Clone & enter
-git clone https://github.com/<your-username>/Xquantify-MT5-CloudDesk.git
+git clone https://github.com/xquantifyx/Xquantify-MT5-CloudDesk.git
 cd Xquantify-MT5-CloudDesk
 
 # 2) Prepare env
