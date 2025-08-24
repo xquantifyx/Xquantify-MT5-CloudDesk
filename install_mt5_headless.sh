@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------
+# ============================================================================
 # Xquantify-MT5-CloudDesk · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
-# Author: Xquantify (www.xquantify.com) · Telegram: @xquantify · GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
-# Defaults moved under /opt/xquantify-mt5 (clean, easy backup/migrate)
-# -----------------------------------------------------------------------------
+# Author  : Xquantify (www.xquantify.com) · Telegram: @xquantify
+# GitHub  : https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
+# License : MIT
+#
+# Highlights
+# - Clean defaults under /opt/xquantify-mt5 (easy backup & cleanup)
+# - Choose installer from GitHub choices list (download/choices.txt) OR pass --mt5-url
+# - Optional --choice <ID> and --choices-url to point to a custom list
+# - Optional --broker <name> to cache different installers by broker
+# - Fast path with prebuilt image (GHCR); fallback auto-installs Wine in base image
+# - Auto-disable broken Chrome apt repo (host + container) to avoid GPG errors
+# - Desktop shortcuts created AND trusted with gio (no “execute text file?” popup)
+# - Autostart MT5 on desktop login (LXDE)
+# - Copy-friendly summary (public IP, ports, passwords) for users to paste
+# - Full uninstall / purge switches
+# ============================================================================
 set -euo pipefail
 
-# ===== Root check =====
+# ----- Root check -----
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root: sudo $0 [options]"; exit 1
 fi
 
-# ===== Project base =====
+# ----- Defaults -----
 BASE_DIR="${BASE_DIR:-/opt/xquantify-mt5}"
 HTTP_PORT="${HTTP_PORT:-6080}"
 VNC_PORT="${VNC_PORT:-5901}"
@@ -21,7 +34,7 @@ DOWNLOAD_DIR="${DOWNLOAD_DIR:-${BASE_DIR}/download}"
 LOG_DIR="${LOG_DIR:-${BASE_DIR}/logs}"
 CONTAINER_NAME="${CONTAINER_NAME:-mt5}"
 
-# Prebuilt (faster) + fallback images
+# Prebuilt + fallback images
 PREFERRED_IMAGE="${PREFERRED_IMAGE:-ghcr.io/xquantifyx/mt5-clouddesk:latest}"
 FALLBACK_IMAGE="${FALLBACK_IMAGE:-dorowu/ubuntu-desktop-lxde-vnc:focal}"
 IMAGE="$FALLBACK_IMAGE"
@@ -30,6 +43,7 @@ IMAGE="$FALLBACK_IMAGE"
 MT5_URL="${MT5_URL:-}"
 CHOICES_URL="${CHOICES_URL:-https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/download/choices.txt}"
 CHOICE_ID="${CHOICE_ID:-}"
+BROKER="${BROKER:-}" # affects cache file name
 
 # Modes
 DEBUG_INSTALL="${DEBUG_INSTALL:-0}"
@@ -41,11 +55,12 @@ UNINSTALL="0"; PURGE_ALL="0"; PURGE_DATA="0"; PURGE_DOWNLOADS="0"; PURGE_IMAGES=
 WINEPREFIX_DIR="/root/.wine"
 MT5_SETUP_PATH="/root/mt5setup.exe"
 
-# ===== Help =====
+# ----- Help -----
 show_help() {
-cat <<EOF
+cat <<'EOF'
 Xquantify-MT5-CloudDesk (/opt layout)
-Run MT5 headlessly with Docker + Wine + noVNC. Use GitHub-hosted choices or your own URL.
+Run MT5 headlessly with Docker + Wine + noVNC.
+Use GitHub-hosted choices (download/choices.txt) or your own URL.
 
 Usage:
   sudo ./install_mt5_headless.sh [options]
@@ -55,14 +70,15 @@ Install options:
   --vnc-port <port>          VNC client port (default: 5901)
   --vnc-pass <password>      VNC password (default: random if left as mt5VNCpass)
   --base-dir <dir>           Base dir (default: /opt/xquantify-mt5)
-  --data-dir <dir>           Data dir (default: \$BASE_DIR/data)
-  --download-dir <dir>       Download cache (default: \$BASE_DIR/download)
+  --data-dir <dir>           Data dir (default: $BASE_DIR/data)
+  --download-dir <dir>       Download cache (default: $BASE_DIR/download)
   --name <container>         Container name (default: mt5)
   --image <image>            Override Docker image
   --mt5-url <url>            Direct installer URL (skips menu)
   --choices-url <raw-url>    Raw URL to choices.txt (ID|Name|URL)
   --choice <ID>              Auto-select by ID from choices.txt
-  --debug-install            Desktop first + 'Install MT5 (Debug)' icon
+  --broker <name>            Label cache by broker (e.g., bybit → mt5_bybit.exe)
+  --debug-install            Desktop first + 'Install MT5 (Debug)' icon (no silent install)
 
 Uninstall options:
   --uninstall                Stop & remove container
@@ -71,10 +87,16 @@ Uninstall options:
   --purge-downloads          Delete downloads dir (with --uninstall)
   --purge-images             Remove Docker images (with --uninstall)
   --yes                      Assume yes to prompts
+
+Examples:
+  sudo ./install_mt5_headless.sh
+  sudo ./install_mt5_headless.sh --choice bybit
+  sudo ./install_mt5_headless.sh --mt5-url "https://.../bybit5setup.exe"
+  sudo ./install_mt5_headless.sh --choice bybit --broker bybit
 EOF
 }
 
-# ===== Args =====
+# ----- Parse args -----
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --http-port)    HTTP_PORT="$2"; shift 2;;
@@ -88,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     --mt5-url)      MT5_URL="$2"; shift 2;;
     --choices-url)  CHOICES_URL="$2"; shift 2;;
     --choice)       CHOICE_ID="$2"; shift 2;;
+    --broker)       BROKER="$2"; shift 2;;
     --debug-install) DEBUG_INSTALL="1"; shift 1;;
 
     --uninstall)        UNINSTALL="1"; shift 1;;
@@ -102,10 +125,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ===== Ensure project dirs =====
+# ----- Ensure dirs -----
 mkdir -p "$BASE_DIR" "$DATA_DIR" "$DOWNLOAD_DIR" "$LOG_DIR"
 chmod 755 "$BASE_DIR" || true
 
+# ----- Header -----
 echo "=== Xquantify · www.xquantify.com ==="
 echo "BASE_DIR:      $BASE_DIR"
 echo "HTTP(noVNC):   $HTTP_PORT"
@@ -119,6 +143,7 @@ echo "CHOICES_URL:   $CHOICES_URL"
 [[ "$DEBUG_INSTALL" == "1" ]] && echo "MODE:          DEBUG-INSTALL"
 echo "====================================="
 
+# ----- Helpers -----
 confirm() { local msg="$1"; [[ "$ASSUME_YES" == "1" ]] && return 0; read -r -p "$msg [y/N]: " a; [[ "${a,,}" == "y" || "${a,,}" == "yes" ]]; }
 pull_with_retry() { local img="$1"; local n=1; while [[ $n -le 3 ]]; do docker pull "$img" >/dev/null 2>&1 && return 0; echo "[!] Pull failed ($n/3) for $img, retrying..."; sleep $((2*n)); n=$((n+1)); done; return 1; }
 
@@ -128,7 +153,7 @@ if [[ "$VNC_PASS" == "mt5VNCpass" ]]; then
   echo "[=] Generated VNC password: $VNC_PASS"
 fi
 
-# ===== Uninstall path =====
+# ----- Uninstall path -----
 if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
   [[ "$PURGE_ALL" == "1" ]] && PURGE_DATA="1" PURGE_DOWNLOADS="1" PURGE_IMAGES="1" ASSUME_YES="1"
   echo "[*] Uninstalling..."
@@ -146,7 +171,7 @@ if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
   echo "[DONE]"; exit 0
 fi
 
-# ===== Fix bad apt source on host =====
+# ----- Fix known bad apt source on host -----
 echo "[*] Checking apt sources on host..."
 if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
   if ! apt-get update -o Dir::Etc::sourcelist="sources.list.d/google-chrome.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
@@ -155,13 +180,14 @@ if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
   fi
 fi
 apt-get update -y -qq || true
-apt-get install -y -qq curl dnsutils >/dev/null 2>&1 || true
+apt-get install -y -qq curl dnsutils ca-certificates >/dev/null 2>&1 || true
 
-# ===== Choices flow =====
+# ----- Choices flow (if no direct URL) -----
 fetch_choices() {
   echo "[*] Fetching choices: $CHOICES_URL"
   CHOICES_RAW="$(curl -fsSL "$CHOICES_URL" || true)"
   [[ -n "${CHOICES_RAW:-}" ]] || return 1
+  # ID|Name|URL (ignore comments/empties)
   echo "$CHOICES_RAW" | awk -F'|' 'BEGIN{OFS="|"} /^[[:space:]]*#/ {next} NF>=3 {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $1,$2,$3 }'
 }
 
@@ -178,11 +204,13 @@ if [[ -z "$MT5_URL" ]]; then
     done
     if [[ -n "$CHOICE_ID" && -n "${ID2LINE[$CHOICE_ID]:-}" ]]; then
       IFS='|' read -r _ _ MT5_URL <<<"${ID2LINE[$CHOICE_ID]}"; echo "[=] Auto-selected: $CHOICE_ID"
+      [[ -z "$BROKER" ]] && BROKER="$CHOICE_ID"
     fi
     while [[ -z "$MT5_URL" ]]; do
       read -r -p "Select a number or paste a URL: " sel
       if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel>=1 && sel<=i )); then
-        IFS='|' read -r _ _ MT5_URL <<<"${ROWS[$((sel-1))]}"
+        IFS='|' read -r id name MT5_URL <<<"${ROWS[$((sel-1))]}"
+        [[ -z "$BROKER" ]] && BROKER="$id"
       elif [[ "$sel" =~ ^https?:// ]]; then
         MT5_URL="$sel"
       else
@@ -196,7 +224,7 @@ if [[ -z "$MT5_URL" ]]; then
   fi
 fi
 
-# Reject non-http(s) and GitHub HTML blob
+# Validate URL
 if ! echo "$MT5_URL" | grep -qiE '^https?://'; then
   echo "❌ Error: URL must start with http:// or https://"; exit 1
 fi
@@ -204,7 +232,7 @@ if echo "$MT5_URL" | grep -qiE 'github\.com/.*/blob/'; then
   echo "❌ Error: GitHub 'blob' links are HTML pages. Use Releases or raw.githubusercontent.com URLs."; exit 1
 fi
 
-# ===== Docker and dirs =====
+# ----- Docker & dirs -----
 if ! command -v docker >/dev/null 2>&1; then
   echo "[+] Installing Docker..."
   apt-get update -qq && apt-get install -y -qq docker.io
@@ -216,9 +244,22 @@ fi
 echo "[=] Using data dir: $DATA_DIR"
 echo "[=] Using download cache: $DOWNLOAD_DIR"
 
-# ===== Download (cached) =====
-INSTALLER_NAME="mt5_Custom.exe"
+# ----- Decide cache file name -----
+sanitize() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9._-+' '_' | sed 's/^_//;s/_$//'; }
+FILENAME_FROM_URL="$(basename "${MT5_URL%%\?*}" | sed 's/%20/ /g')"
+if [[ -n "$BROKER" ]]; then
+  BROKER_SAFE="$(sanitize "$BROKER")"
+  INSTALLER_NAME="mt5_${BROKER_SAFE}.exe"
+elif [[ -n "$FILENAME_FROM_URL" && "$FILENAME_FROM_URL" =~ \.exe$ ]]; then
+  INSTALLER_NAME="$FILENAME_FROM_URL"
+elif [[ -n "$CHOICE_ID" ]]; then
+  INSTALLER_NAME="mt5_${CHOICE_ID}.exe"
+else
+  INSTALLER_NAME="mt5_Custom.exe"
+fi
 CACHED_PATH="${DOWNLOAD_DIR}/${INSTALLER_NAME}"
+
+# ----- Download (cached) -----
 if [[ -f "$CACHED_PATH" ]]; then
   echo "[=] Installer found in cache: $CACHED_PATH"
 else
@@ -230,7 +271,7 @@ else
   echo "[=] Saved: $CACHED_PATH"
 fi
 
-# ===== Choose image (prebuilt -> fallback) =====
+# ----- Choose image (prebuilt -> fallback) -----
 echo "[*] Trying prebuilt Wine image: ${PREFERRED_IMAGE}"
 if pull_with_retry "$PREFERRED_IMAGE"; then IMAGE="$PREFERRED_IMAGE"; else echo "[!] Prebuilt not available; using fallback."; IMAGE="$FALLBACK_IMAGE"; fi
 echo "[+] Using image: $IMAGE"
@@ -262,7 +303,7 @@ dpkg --add-architecture i386
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   wine64 wine32 winbind cabextract wget xvfb xauth x11-xserver-utils winetricks \
-  ca-certificates fonts-wqy-zenhei fonts-noto-cjk
+  ca-certificates fonts-wqy-zenhei fonts-noto-cjk libglib2.0-bin
 "
 else
   echo "[=] Wine already preinstalled."
@@ -302,6 +343,7 @@ Terminal=false
 Categories=Utility;
 EOF
 chmod +x /root/Desktop/'Install MT5 (Debug).desktop'
+gio set /root/Desktop/'Install MT5 (Debug).desktop' metadata::trusted true || true
 "
 else
   echo "[=] Installing MT5 silently..."
@@ -328,13 +370,14 @@ Terminal=false
 Categories=Finance;
 EOF
 chmod +x /root/Desktop/MetaTrader5.desktop
-# Use absolute path to avoid unbound var expansion
+gio set /root/Desktop/MetaTrader5.desktop metadata::trusted true || true
+# Autostart on desktop session
 mkdir -p /etc/xdg/lxsession/LXDE
 grep -q '/usr/local/bin/mt5' /etc/xdg/lxsession/LXDE/autostart 2>/dev/null || echo '@/usr/local/bin/mt5' >> /etc/xdg/lxsession/LXDE/autostart
 "
 fi
 
-# Detect public IP and print summary
+# Detect public IP and print
 detect_ip() {
   for svc in "https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com" "https://checkip.amazonaws.com"; do
     ip="$(curl -fsS $svc || true)"; ip="$(echo "$ip" | tr -d '[:space:]')"
@@ -357,6 +400,7 @@ echo " Image         : $IMAGE"
 echo " Data dir      : $DATA_DIR"
 echo " Downloads     : $DOWNLOAD_DIR"
 echo " VNC password  : $VNC_PASS"
+echo " Installer     : ${INSTALLER_NAME}"
 if [[ -n "${PUBLIC_IP}" ]]; then
   echo " noVNC (browser): http://${PUBLIC_IP}:${HTTP_PORT}"
   echo " VNC (client)   : ${PUBLIC_IP}:${VNC_PORT}"
