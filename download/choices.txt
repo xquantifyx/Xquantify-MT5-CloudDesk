@@ -1,6 +1,4 @@
-
-
-# ID|Name|URL
+# ID|Name|URL (3 fields separated by |)
+# Tip: Prefer GitHub Releases links for large files; avoid "blob" page links.
 bybit|Bybit MT5 (official CDN)|https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe
-bybitBackup|Bybit MT5 (official CDN)|https://github.com/xquantifyx/Xquantify-MT5-CloudDesk/releases/download/v1.3.0/bybit5setup.exe
 backup|Backup MT5 (GitHub Release)|https://github.com/xquantifyx/Xquantify-MT5-CloudDesk/releases/download/v1.3.0/bybit5setup.exe
