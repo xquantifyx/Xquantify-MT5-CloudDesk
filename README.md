@@ -1,4 +1,4 @@
-# Xquantify‑MT5‑CloudDesk
+# Xquantify-MT5-CloudDesk
 
 Deploy MetaTrader 5 on Ubuntu VPS using Docker + Wine + noVNC.  
 Author: **Xquantify** — https://www.xquantify.com — Telegram: @xquantify
@@ -14,7 +14,7 @@ Author: **Xquantify** — https://www.xquantify.com — Telegram: @xquantify
 - Auto-fixes Chrome apt GPG repo issues (host + container)
 - Desktop shortcuts are **trusted** (no “execute text file?” dialog)
 - MT5 **autostarts** on desktop login
-- Detailed end‑of‑install **summary** (VNC URL/ports/password, dirs, container)
+- Detailed end-of-install **summary** (VNC URL/ports/password, dirs, container)
 
 ---
 
@@ -92,7 +92,7 @@ sudo ufw allow 5901/tcp   # VNC
 ---
 
 ## 🩺 Troubleshooting
-- **GPG/Chrome apt errors**: script will auto‑disable the invalid repo on host & container.
+- **GPG/Chrome apt errors**: script will auto-disable the invalid repo on host & container.
 - **noVNC page opens but icon prompts “execute text file?”** → already handled by trusting `.desktop` via `gio`.
 - **Direct GitHub link downloads HTML** → you used a `blob` link. Use **raw.githubusercontent.com** or a **Releases** link.
 
