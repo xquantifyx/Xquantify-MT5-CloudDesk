@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Xquantify-MT5-CloudDesk · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
+# Xquantify-MT5-CloudDesk (Simple) · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
 # Author: Xquantify (www.xquantify.com) · Telegram: @xquantify
-# Adds: download cache for multiple brokers + broker presets (incl. Bybit)
+# Simplified: no --broker presets. Accepts --mt5-url or prompts user to paste URL.
+# Adds: Full uninstall flags.
+# Caches installer under ~/mt5downloads/mt5_Custom.exe
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -14,10 +16,15 @@ DATA_DIR="${DATA_DIR:-$HOME/mt5data}"  # Persistent data dir on host
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-$HOME/mt5downloads}"  # cache installers
 CONTAINER_NAME="${CONTAINER_NAME:-mt5}"
 IMAGE="${IMAGE:-dorowu/ubuntu-desktop-lxde-vnc:focal}"  # LXDE + noVNC + VNC
+MT5_URL="${MT5_URL:-}"                 # Custom URL or interactive prompt
 
-# Broker & URL selection
-BROKER="${BROKER:-metaquotes}"  # default preset
-MT5_URL="${MT5_URL:-}"          # custom URL overrides broker preset
+# Uninstall flags
+UNINSTALL="0"
+PURGE_ALL="0"
+PURGE_DATA="0"
+PURGE_DOWNLOADS="0"
+PURGE_IMAGES="0"
+ASSUME_YES="0"
 
 # Inside container
 WINEPREFIX_DIR="/root/.wine"
@@ -26,9 +33,13 @@ MT5_SETUP_PATH="/root/mt5setup.exe"
 
 show_help() {
 cat <<EOF
-Usage: sudo ./install_mt5_headless.sh [options]
+Xquantify-MT5-CloudDesk (Simple)
+Run MT5 headlessly with Docker+Wine+noVNC. Paste your MT5 installer URL or pass --mt5-url.
 
-Options:
+Usage:
+  sudo ./install_mt5_headless.sh [options]
+
+Install options:
   --http-port <port>         noVNC (browser) port (default: 6080)
   --vnc-port <port>          VNC client port (default: 5901)
   --vnc-pass <password>      VNC password (default: mt5VNCpass)
@@ -36,43 +47,21 @@ Options:
   --download-dir <dir>       Host download cache dir (default: ~/mt5downloads)
   --name <container>         Container name (default: mt5)
   --image <image>            Docker image (default: dorowu/ubuntu-desktop-lxde-vnc:focal)
+  --mt5-url <url>            MT5 installer URL (if omitted, script will prompt)
 
-  --broker <key>             Choose preset broker (default: metaquotes)
-  --list-brokers             List available broker keys
-  --mt5-url <url>            Custom installer URL (overrides --broker)
+Uninstall options:
+  --uninstall                Stop & remove container only
+  --purge-all                Uninstall + delete data dir + downloads cache + remove image
+  --purge-data               Delete data dir (with --uninstall)
+  --purge-downloads          Delete downloads cache (with --uninstall)
+  --purge-images             Remove Docker image (with --uninstall)
+  --yes                      Non-interactive (assume yes to prompts)
 
-  -h, --help                 Show this help
+Examples:
+  sudo ./install_mt5_headless.sh
+  sudo ./install_mt5_headless.sh --mt5-url "https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
+  sudo ./install_mt5_headless.sh --uninstall --purge-all --yes
 EOF
-}
-
-# ---- Broker presets ----------------------------------------------------------
-declare -A BROKER_URLS=(
-  [metaquotes]="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-  [exness]="https://download.mql5.com/cdn/web/exness.technologies.ltd/mt5/mt5setup.exe"
-  [icmarkets]="https://download.mql5.com/cdn/web/ic.markets/mt5/mt5setup.exe"
-  [pepperstone]="https://download.mql5.com/cdn/web/pepperstone.group.limited/mt5/mt5setup.exe"
-  [xm]="https://download.mql5.com/cdn/web/xm.global/mt5/mt5setup.exe"
-  # NEW: Bybit
-  [bybit]="https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
-)
-
-list_brokers() {
-  echo "Available broker keys:"
-  for k in "${!BROKER_URLS[@]}"; do echo "  - $k"; done | sort
-}
-
-resolve_url() {
-  local url="$MT5_URL"
-  if [[ -z "$url" ]]; then
-    if [[ -n "${BROKER_URLS[$BROKER]:-}" ]]; then
-      url="${BROKER_URLS[$BROKER]}"
-    else
-      echo "ERROR: Unknown broker '$BROKER' and no --mt5-url provided." >&2
-      echo "Run with --list-brokers to see available keys." >&2
-      exit 1
-    fi
-  fi
-  echo "$url"
 }
 
 # ===== Parse flags ============================================================
@@ -85,10 +74,14 @@ while [[ $# -gt 0 ]]; do
     --download-dir) DOWNLOAD_DIR="$2"; shift 2;;
     --name)         CONTAINER_NAME="$2"; shift 2;;
     --image)        IMAGE="$2"; shift 2;;
-
-    --broker)       BROKER="$2"; shift 2;;
     --mt5-url)      MT5_URL="$2"; shift 2;;
-    --list-brokers) list_brokers; exit 0;;
+
+    --uninstall)        UNINSTALL="1"; shift 1;;
+    --purge-all)        PURGE_ALL="1"; shift 1;;
+    --purge-data)       PURGE_DATA="1"; shift 1;;
+    --purge-downloads)  PURGE_DOWNLOADS="1"; shift 1;;
+    --purge-images)     PURGE_IMAGES="1"; shift 1;;
+    --yes)              ASSUME_YES="1"; shift 1;;
 
     -h|--help)      show_help; exit 0;;
     *) echo "Unknown argument: $1"; show_help; exit 1;;
@@ -102,18 +95,96 @@ echo "DATA_DIR:      $DATA_DIR"
 echo "DOWNLOAD_DIR:  $DOWNLOAD_DIR"
 echo "NAME:          $CONTAINER_NAME"
 echo "IMAGE:         $IMAGE"
-echo "BROKER:        $BROKER"
-if [[ -n "$MT5_URL" ]]; then echo "(Custom URL overrides broker)"; fi
+if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then echo "MODE:          UNINSTALL"; fi
 echo "====================================="
 
+# ===== Helper: prompt yes/no ================================================
+confirm() {
+  local msg="$1"
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    return 0
+  fi
+  read -r -p "$msg [y/N]: " ans
+  [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]
+}
+
+# ===== Uninstall path ========================================================
+if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
+  # Decide purges
+  if [[ "$PURGE_ALL" == "1" ]]; then
+    PURGE_DATA="1"; PURGE_DOWNLOADS="1"; PURGE_IMAGES="1"; ASSUME_YES="1"
+  fi
+
+  echo "[*] Uninstalling Xquantify-MT5-CloudDesk..."
+  # Stop & remove container
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+      echo "[+] Removing container: ${CONTAINER_NAME}"
+      docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    else
+      echo "[=] Container not found: ${CONTAINER_NAME}"
+    fi
+    # Remove image
+    if [[ "$PURGE_IMAGES" == "1" ]]; then
+      if confirm "Remove Docker image ${IMAGE}?"; then
+        docker rmi "${IMAGE}" >/dev/null 2>&1 || true
+        echo "[=] Image removal attempted: ${IMAGE}"
+      fi
+    fi
+  else
+    echo "[=] Docker not installed; skipping container/image removal."
+  fi
+
+  # Purge data
+  if [[ "$PURGE_DATA" == "1" ]]; then
+    if [[ -d "$DATA_DIR" ]]; then
+      if confirm "Delete data dir ${DATA_DIR}? This removes MT5 profiles/logins."; then
+        rm -rf "$DATA_DIR"
+        echo "[=] Deleted: $DATA_DIR"
+      fi
+    else
+      echo "[=] Data dir not found: $DATA_DIR"
+    fi
+  fi
+
+  # Purge downloads
+  if [[ "$PURGE_DOWNLOADS" == "1" ]]; then
+    if [[ -d "$DOWNLOAD_DIR" ]]; then
+      if confirm "Delete downloads cache ${DOWNLOAD_DIR}?"; then
+        rm -rf "$DOWNLOAD_DIR"
+        echo "[=] Deleted: $DOWNLOAD_DIR"
+      fi
+    else
+      echo "[=] Downloads dir not found: $DOWNLOAD_DIR"
+    fi
+  fi
+
+  echo "[DONE] Uninstall completed."
+  exit 0
+fi
+
+# ===== Install path ==========================================================
+# Ensure tools
 apt-get update -y >/dev/null 2>&1 || true
 apt-get install -y curl dnsutils >/dev/null 2>&1 || true
 
-FINAL_URL="$(resolve_url)"
-FN_BROKER="${BROKER:-Custom}"
-INSTALLER_NAME="mt5_${FN_BROKER}.exe"
-[[ -n "$MT5_URL" ]] && INSTALLER_NAME="mt5_Custom.exe"
+# Ask for URL if missing
+if [[ -z "$MT5_URL" ]]; then
+  echo "👉 Please paste your MT5 installer URL (e.g. Bybit):"
+  echo "   https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
+  read -r -p "URL: " MT5_URL
+  if [[ -z "$MT5_URL" ]]; then
+    echo "❌ Error: no URL provided. Exiting."
+    exit 1
+  fi
+fi
+# Basic URL sanity
+if ! echo "$MT5_URL" | grep -qiE '^https?://'; then
+  echo "❌ Error: URL must start with http:// or https://"
+  exit 1
+fi
 
+# Ensure Docker
 if ! command -v docker >/dev/null 2>&1; then
   echo "[+] Installing Docker..."
   apt-get update
@@ -124,27 +195,33 @@ else
   echo "[=] Docker found."
 fi
 
+# Prepare directories
 mkdir -p "$DATA_DIR" "$DOWNLOAD_DIR"
 echo "[=] Using data dir: $DATA_DIR"
 echo "[=] Using download cache: $DOWNLOAD_DIR"
 
+# Cache download (host)
+INSTALLER_NAME="mt5_Custom.exe"
 CACHED_PATH="${DOWNLOAD_DIR}/${INSTALLER_NAME}"
 if [[ -f "$CACHED_PATH" ]]; then
   echo "[=] Installer found in cache: $CACHED_PATH"
 else
   echo "[+] Downloading MT5 installer to cache..."
-  curl -fL --retry 4 -o "$CACHED_PATH" "$FINAL_URL"
+  curl -fL --retry 5 --retry-all-errors -o "$CACHED_PATH" "$MT5_URL"
   echo "[=] Saved: $CACHED_PATH"
 fi
 
+# Pull image
 echo "[+] Pulling image: $IMAGE"
 docker pull "$IMAGE"
 
+# Remove old container if exists
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   echo "[!] Removing existing container: $CONTAINER_NAME"
   docker rm -f "$CONTAINER_NAME" || true
 fi
 
+# Start container (mount data + downloads)
 echo "[+] Starting container..."
 docker run -d \
   --name "$CONTAINER_NAME" \
@@ -160,6 +237,7 @@ docker run -d \
 
 sleep 5
 
+# Install Wine inside container
 echo "[+] Installing Wine inside container..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
@@ -170,6 +248,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   ca-certificates fonts-wqy-zenhei fonts-noto-cjk
 "
 
+# Init Wine prefix
 echo "[=] Initializing Wine prefix..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
@@ -178,19 +257,21 @@ ln -sfn /config/wineprefix $WINEPREFIX_DIR || true
 WINEPREFIX=$WINEPREFIX_DIR winecfg >/dev/null 2>&1 || true
 "
 
-echo "[=] Installing MT5 from cached installer: $INSTALLER_NAME"
+# Install MT5 from cached installer
+echo "[=] Installing MT5 from cached installer..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
 cp '/downloads/${INSTALLER_NAME}' '$MT5_SETUP_PATH'
 WINEPREFIX=$WINEPREFIX_DIR wine '$MT5_SETUP_PATH' /silent || true
 "
 
+# Launcher, desktop icon, autostart
 echo "[=] Creating launcher & autostart..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
 cat >/usr/local/bin/mt5 <<'EOF'
 #!/usr/bin/env bash
-export WINEPREFIX='$WINEPREFIX_DIR'
+export WINEPREFIX='/root/.wine'
 exec wine 'C:\\Program Files\\MetaTrader 5\\terminal64.exe'
 EOF
 chmod +x /usr/local/bin/mt5
@@ -211,9 +292,10 @@ chmod +x /root/Desktop/MetaTrader5.desktop
 
 mkdir -p /etc/xdg/lxsession/LXDE
 AUTOSTART=/etc/xdg/lxsession/LXDE/autostart
-grep -q '/usr/local/bin/mt5' \$AUTOSTART 2>/dev/null || echo '@/usr/local/bin/mt5' >> \$AUTOSTART
+grep -q '/usr/local/bin/mt5' $AUTOSTART 2>/dev/null || echo '@/usr/local/bin/mt5' >> $AUTOSTART
 "
 
+# Detect public IP & print URLs
 detect_ip() {
   for svc in \
     "https://api.ipify.org" \
@@ -226,7 +308,7 @@ detect_ip() {
     if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
       echo "$ip"; return 0
     fi
-  end
+  done
   ip="$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null || true)"
   ip="$(echo "$ip" | head -n1 | tr -d '[:space:]')"
   if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
@@ -242,7 +324,6 @@ echo "Xquantify · www.xquantify.com"
 echo "Container:  $CONTAINER_NAME"
 echo "Data dir:   $DATA_DIR"
 echo "Downloads:  $DOWNLOAD_DIR"
-echo "Broker:     $BROKER"
 echo "VNC pass:   $VNC_PASS"
 echo
 if [[ -n "${PUBLIC_IP}" ]]; then
