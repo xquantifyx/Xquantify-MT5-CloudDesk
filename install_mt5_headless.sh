@@ -2,57 +2,61 @@
 # -----------------------------------------------------------------------------
 # Xquantify-MT5-CloudDesk · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
 # Author: Xquantify (www.xquantify.com) · Telegram: @xquantify · GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
-# Features:
-#   - Choose installer from GitHub choices list (download/choices.txt)
-#   - OR pass a direct URL with --mt5-url
-#   - Fast path with prebuilt Wine image (optional, GHCR); fallback auto-installs Wine
-#   - Auto-disable broken apt sources (Chrome GPG) on host & in container
-#   - Debug mode (--debug-install) shows installer UI
-#   - Full uninstall (--uninstall / --purge-all)
-#   - Prints copy-friendly summary (noVNC URL, VNC endpoint, ports, dirs, password)
+# Defaults moved under /opt/xquantify-mt5 (clean, easy backup/migrate)
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
+# ===== Root check =====
+if [[ $EUID -ne 0 ]]; then
+  echo "Please run as root: sudo $0 [options]"; exit 1
+fi
+
+# ===== Project base =====
+BASE_DIR="${BASE_DIR:-/opt/xquantify-mt5}"
 HTTP_PORT="${HTTP_PORT:-6080}"
 VNC_PORT="${VNC_PORT:-5901}"
 VNC_PASS="${VNC_PASS:-mt5VNCpass}"
-DATA_DIR="${DATA_DIR:-$HOME/mt5data}"
-DOWNLOAD_DIR="${DOWNLOAD_DIR:-$HOME/mt5downloads}"
+DATA_DIR="${DATA_DIR:-${BASE_DIR}/data}"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-${BASE_DIR}/download}"
+LOG_DIR="${LOG_DIR:-${BASE_DIR}/logs}"
 CONTAINER_NAME="${CONTAINER_NAME:-mt5}"
 
+# Prebuilt (faster) + fallback images
 PREFERRED_IMAGE="${PREFERRED_IMAGE:-ghcr.io/xquantifyx/mt5-clouddesk:latest}"
 FALLBACK_IMAGE="${FALLBACK_IMAGE:-dorowu/ubuntu-desktop-lxde-vnc:focal}"
 IMAGE="$FALLBACK_IMAGE"
 
+# Installer sources
 MT5_URL="${MT5_URL:-}"
 CHOICES_URL="${CHOICES_URL:-https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/download/choices.txt}"
 CHOICE_ID="${CHOICE_ID:-}"
+
+# Modes
 DEBUG_INSTALL="${DEBUG_INSTALL:-0}"
 
-UNINSTALL="0"
-PURGE_ALL="0"
-PURGE_DATA="0"
-PURGE_DOWNLOADS="0"
-PURGE_IMAGES="0"
-ASSUME_YES="0"
+# Uninstall flags
+UNINSTALL="0"; PURGE_ALL="0"; PURGE_DATA="0"; PURGE_DOWNLOADS="0"; PURGE_IMAGES="0"; ASSUME_YES="0"
 
+# Internals
 WINEPREFIX_DIR="/root/.wine"
 MT5_SETUP_PATH="/root/mt5setup.exe"
 
+# ===== Help =====
 show_help() {
 cat <<EOF
-Xquantify-MT5-CloudDesk
+Xquantify-MT5-CloudDesk (/opt layout)
 Run MT5 headlessly with Docker + Wine + noVNC. Use GitHub-hosted choices or your own URL.
 
 Usage:
   sudo ./install_mt5_headless.sh [options]
 
 Install options:
-  --http-port <port>         noVNC port (default: 6080)
-  --vnc-port <port>          VNC port (default: 5901)
+  --http-port <port>         noVNC (browser) port (default: 6080)
+  --vnc-port <port>          VNC client port (default: 5901)
   --vnc-pass <password>      VNC password (default: random if left as mt5VNCpass)
-  --data-dir <dir>           Data dir (default: ~/mt5data)
-  --download-dir <dir>       Download cache (default: ~/mt5downloads)
+  --base-dir <dir>           Base dir (default: /opt/xquantify-mt5)
+  --data-dir <dir>           Data dir (default: \$BASE_DIR/data)
+  --download-dir <dir>       Download cache (default: \$BASE_DIR/download)
   --name <container>         Container name (default: mt5)
   --image <image>            Override Docker image
   --mt5-url <url>            Direct installer URL (skips menu)
@@ -70,12 +74,13 @@ Uninstall options:
 EOF
 }
 
-# ===== Parse args =====
+# ===== Args =====
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --http-port)    HTTP_PORT="$2"; shift 2;;
     --vnc-port)     VNC_PORT="$2"; shift 2;;
     --vnc-pass)     VNC_PASS="$2"; shift 2;;
+    --base-dir)     BASE_DIR="$2"; shift 2;;
     --data-dir)     DATA_DIR="$2"; shift 2;;
     --download-dir) DOWNLOAD_DIR="$2"; shift 2;;
     --name)         CONTAINER_NAME="$2"; shift 2;;
@@ -97,7 +102,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ===== Ensure project dirs =====
+mkdir -p "$BASE_DIR" "$DATA_DIR" "$DOWNLOAD_DIR" "$LOG_DIR"
+chmod 755 "$BASE_DIR" || true
+
 echo "=== Xquantify · www.xquantify.com ==="
+echo "BASE_DIR:      $BASE_DIR"
 echo "HTTP(noVNC):   $HTTP_PORT"
 echo "VNC:           $VNC_PORT"
 echo "DATA_DIR:      $DATA_DIR"
@@ -203,7 +213,6 @@ else
   echo "[=] Docker found."
 fi
 
-mkdir -p "$DATA_DIR" "$DOWNLOAD_DIR"
 echo "[=] Using data dir: $DATA_DIR"
 echo "[=] Using download cache: $DOWNLOAD_DIR"
 
@@ -319,13 +328,13 @@ Terminal=false
 Categories=Finance;
 EOF
 chmod +x /root/Desktop/MetaTrader5.desktop
+# Use absolute path to avoid unbound var expansion
 mkdir -p /etc/xdg/lxsession/LXDE
-AUTOSTART=/etc/xdg/lxsession/LXDE/autostart
-grep -q '/usr/local/bin/mt5' $AUTOSTART 2>/dev/null || echo '@/usr/local/bin/mt5' >> $AUTOSTART
+grep -q '/usr/local/bin/mt5' /etc/xdg/lxsession/LXDE/autostart 2>/dev/null || echo '@/usr/local/bin/mt5' >> /etc/xdg/lxsession/LXDE/autostart
 "
 fi
 
-# Detect public IP and print
+# Detect public IP and print summary
 detect_ip() {
   for svc in "https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com" "https://checkip.amazonaws.com"; do
     ip="$(curl -fsS $svc || true)"; ip="$(echo "$ip" | tr -d '[:space:]')"
@@ -342,6 +351,7 @@ echo
 echo "=============================================================="
 echo " Xquantify · www.xquantify.com"
 echo "=============================================================="
+echo " Base dir      : $BASE_DIR"
 echo " Container     : $CONTAINER_NAME"
 echo " Image         : $IMAGE"
 echo " Data dir      : $DATA_DIR"
