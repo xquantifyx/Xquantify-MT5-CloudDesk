@@ -6,7 +6,7 @@ This simplified installer no longer needs broker presets — paste **any MT5 ins
 ## 🚀 Quick Start
 
 ```bash
-curl -O https://raw.githubusercontent.com/<your-username>/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh
+curl -O https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh
 chmod +x install_mt5_headless.sh
 sudo ./install_mt5_headless.sh
 # Paste your MT5 installer URL when prompted (e.g. Bybit):
@@ -42,4 +42,5 @@ sudo ./install_mt5_headless.sh --uninstall --purge-data --purge-downloads --purg
 
 ## 📌 Author & Contact
 **Xquantify** · https://www.xquantify.com  
+GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk  
 Telegram: https://t.me/xquantify
