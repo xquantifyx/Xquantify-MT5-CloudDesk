@@ -245,7 +245,12 @@ echo "[=] Using data dir: $DATA_DIR"
 echo "[=] Using download cache: $DOWNLOAD_DIR"
 
 # ----- Decide cache file name -----
-sanitize() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9._-+' '_' | sed 's/^_//;s/_$//'; }
+sanitize() {
+  LC_ALL=C printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9._+\-]+/_/g; s/^_+|_+$//g'
+}
+
 FILENAME_FROM_URL="$(basename "${MT5_URL%%\?*}" | sed 's/%20/ /g')"
 if [[ -n "$BROKER" ]]; then
   BROKER_SAFE="$(sanitize "$BROKER")"
