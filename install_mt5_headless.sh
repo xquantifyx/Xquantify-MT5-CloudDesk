@@ -1,40 +1,61 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Xquantify-MT5-CloudDesk · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
-# Author: Xquantify (www.xquantify.com) · Telegram: @xquantify · GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
-# Optimized: /opt layout, choices+URL, broker-aware cache, autostart fix, trusted desktop, LXDE auto-launch .desktop
-# -----------------------------------------------------------------------------
+# Author : Xquantify (www.xquantify.com) · Telegram: @xquantify
+# GitHub : https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
+# License: MIT
+#
+# Highlights
+# - Clean defaults under /opt/xquantify-mt5 (easy backup & cleanup)
+# - Choose installer from GitHub choices list OR pass --mt5-url
+# - Optional --choice <ID> / --choices-url and --broker <name> (cache per broker)
+# - Pulls prebuilt GHCR image, fallback auto-installs Wine
+# - Handles non-systemd hosts by starting dockerd directly if needed
+# - Desktop shortcuts are trusted + LXDE set to launch .desktop without prompt
+# - Full uninstall + purge-all that removes all files created by this script
+# =============================================================================
 set -euo pipefail
 
+# ---------- Root check ----------
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root: sudo $0 [options]"; exit 1
 fi
 
-# Defaults
+# ---------- Defaults ----------
 BASE_DIR="${BASE_DIR:-/opt/xquantify-mt5}"
 HTTP_PORT="${HTTP_PORT:-6080}"
 VNC_PORT="${VNC_PORT:-5901}"
 VNC_PASS="${VNC_PASS:-mt5VNCpass}"
+
 DATA_DIR="${DATA_DIR:-${BASE_DIR}/data}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-${BASE_DIR}/download}"
 LOG_DIR="${LOG_DIR:-${BASE_DIR}/logs}"
+
 CONTAINER_NAME="${CONTAINER_NAME:-mt5}"
 
+# Prebuilt (fast) + fallback images
 PREFERRED_IMAGE="${PREFERRED_IMAGE:-ghcr.io/xquantifyx/mt5-clouddesk:latest}"
 FALLBACK_IMAGE="${FALLBACK_IMAGE:-dorowu/ubuntu-desktop-lxde-vnc:focal}"
 IMAGE="$FALLBACK_IMAGE"
 
+# Sources / selection
 MT5_URL="${MT5_URL:-}"
 CHOICES_URL="${CHOICES_URL:-https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/download/choices.txt}"
 CHOICE_ID="${CHOICE_ID:-}"
 BROKER="${BROKER:-}"
+
+# Modes
 DEBUG_INSTALL="${DEBUG_INSTALL:-0}"
 
+# Uninstall flags
 UNINSTALL="0"; PURGE_ALL="0"; PURGE_DATA="0"; PURGE_DOWNLOADS="0"; PURGE_IMAGES="0"; ASSUME_YES="0"
 
+# Internals
 WINEPREFIX_DIR="/root/.wine"
 MT5_SETUP_PATH="/root/mt5setup.exe"
+DOCKERD_LOG="/var/log/dockerd.log"
 
+# ---------- Help ----------
 show_help() {
 cat <<'EOF'
 Xquantify-MT5-CloudDesk (/opt layout)
@@ -44,31 +65,38 @@ Usage:
   sudo ./install_mt5_headless.sh [options]
 
 Install options:
-  --http-port <port>         noVNC port (default: 6080)
+  --http-port <port>         noVNC (browser) port (default: 6080)
   --vnc-port <port>          VNC client port (default: 5901)
   --vnc-pass <password>      VNC password (default: random if left as mt5VNCpass)
   --base-dir <dir>           Base dir (default: /opt/xquantify-mt5)
   --data-dir <dir>           Data dir (default: $BASE_DIR/data)
-  --download-dir <dir>       Download cache (default: $BASE_DIR/download)
+  --download-dir <dir>       Download cache dir (default: $BASE_DIR/download)
   --name <container>         Container name (default: mt5)
-  --image <image>            Override Docker image
-  --mt5-url <url>            Direct installer URL
+  --image <image>            Force a Docker image
+  --mt5-url <url>            MT5 installer direct URL (skip choices menu)
   --choices-url <raw-url>    Raw URL to choices.txt (ID|Name|URL)
   --choice <ID>              Auto-select by ID from choices.txt
-  --broker <name>            Tag cache file name (mt5_<name>.exe)
-  --debug-install            Desktop first + 'Install MT5 (Debug)' icon
+  --broker <name>            Tag cache file as mt5_<name>.exe
+  --debug-install            Desktop first; create 'Install MT5 (Debug)' icon
 
-Uninstall options:
-  --uninstall                Stop & remove container
-  --purge-all                Uninstall + delete data + downloads + images
+Uninstall / cleanup:
+  --uninstall                Stop & remove container (no file deletion)
+  --purge-all                Uninstall + delete $BASE_DIR (data, downloads, logs) + remove images
   --purge-data               Delete data dir (with --uninstall)
   --purge-downloads          Delete downloads dir (with --uninstall)
   --purge-images             Remove Docker images (with --uninstall)
-  --yes                      Assume yes to prompts
+  --yes                      Assume 'yes' to prompts
+
+Examples:
+  sudo ./install_mt5_headless.sh
+  sudo ./install_mt5_headless.sh --choice bybit
+  sudo ./install_mt5_headless.sh --mt5-url "https://.../bybit5setup.exe"
+  sudo ./install_mt5_headless.sh --choice bybit --broker bybit
+  sudo ./install_mt5_headless.sh --purge-all --yes
 EOF
 }
 
-# Parse args
+# ---------- Parse args ----------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --http-port)    HTTP_PORT="$2"; shift 2;;
@@ -97,7 +125,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Ensure dirs
+# ---------- Ensure dirs ----------
 mkdir -p "$BASE_DIR" "$DATA_DIR" "$DOWNLOAD_DIR" "$LOG_DIR"
 chmod 755 "$BASE_DIR" || true
 
@@ -114,8 +142,49 @@ echo "CHOICES_URL:   $CHOICES_URL"
 [[ "$DEBUG_INSTALL" == "1" ]] && echo "MODE:          DEBUG-INSTALL"
 echo "====================================="
 
+# ---------- Helpers ----------
 confirm() { local msg="$1"; [[ "$ASSUME_YES" == "1" ]] && return 0; read -r -p "$msg [y/N]: " a; [[ "${a,,}" == "y" || "${a,,}" == "yes" ]]; }
-pull_with_retry() { local img="$1"; local n=1; while [[ $n -le 3 ]]; do docker pull "$img" >/dev/null 2>&1 && return 0; echo "[!] Pull failed ($n/3) for $img, retrying..."; sleep $((2*n)); n=$((n+1)); done; return 1; }
+
+pull_with_retry() {
+  local img="$1"; local n=1
+  while [[ $n -le 3 ]]; do
+    docker pull "$img" >/dev/null 2>&1 && return 0
+    echo "[!] Pull failed ($n/3) for $img, retrying..."
+    sleep $((2*n)); n=$((n+1))
+  done
+  return 1
+}
+
+start_docker_daemon() {
+  # If daemon already up, done
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    echo "[=] Docker daemon already running."; return 0
+  fi
+  # Try systemd
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    echo "[*] Starting Docker via systemd..."
+    systemctl enable docker >/dev/null 2>&1 || true
+    systemctl start docker  >/dev/null 2>&1 || true
+  # Try sysvinit service
+  elif command -v service >/dev/null 2>&1; then
+    echo "[*] Starting Docker via service..."
+    service docker start >/dev/null 2>&1 || true
+  fi
+  # Fallback: spawn dockerd directly (non-systemd environments)
+  if ! docker info >/dev/null 2>&1; then
+    echo "[!] systemd/service not available; starting dockerd directly..."
+    mkdir -p /var/run
+    nohup dockerd -H unix:///var/run/docker.sock >"$DOCKERD_LOG" 2>&1 &
+    for i in $(seq 1 20); do
+      docker info >/dev/null 2>&1 && break
+      sleep 0.5
+    done
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "❌ Docker daemon could not be started. Check $DOCKERD_LOG"; return 1
+  fi
+  echo "[=] Docker is ready."
+}
 
 # Randomize VNC password if default
 if [[ "$VNC_PASS" == "mt5VNCpass" ]]; then
@@ -123,25 +192,33 @@ if [[ "$VNC_PASS" == "mt5VNCpass" ]]; then
   echo "[=] Generated VNC password: $VNC_PASS"
 fi
 
-# Uninstall path
+# ---------- Uninstall path ----------
 if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
   [[ "$PURGE_ALL" == "1" ]] && PURGE_DATA="1" PURGE_DOWNLOADS="1" PURGE_IMAGES="1" ASSUME_YES="1"
   echo "[*] Uninstalling..."
   if command -v docker >/dev/null 2>&1; then
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
     if [[ "$PURGE_IMAGES" == "1" ]]; then
-      if confirm "Remove Docker images (preferred+fallback)?"; then
+      if confirm "Remove Docker images (preferred + fallback)?"; then
         docker rmi "${PREFERRED_IMAGE}" >/dev/null 2>&1 || true
         docker rmi "${FALLBACK_IMAGE}"  >/dev/null 2>&1 || true
       fi
     fi
   fi
-  [[ "$PURGE_DATA" == "1" && -d "$DATA_DIR" ]] && rm -rf "$DATA_DIR"
-  [[ "$PURGE_DOWNLOADS" == "1" && -d "$DOWNLOAD_DIR" ]] && rm -rf "$DOWNLOAD_DIR"
+  # Remove data/downloads or entire BASE_DIR for purge-all
+  if [[ "$PURGE_ALL" == "1" ]]; then
+    echo "[*] Removing entire $BASE_DIR (data, downloads, logs)..."
+    rm -rf "$BASE_DIR" 2>/dev/null || true
+    # remove dockerd log we might have created
+    rm -f "$DOCKERD_LOG" 2>/dev/null || true
+  else
+    [[ "$PURGE_DATA" == "1" && -d "$DATA_DIR" ]] && rm -rf "$DATA_DIR"
+    [[ "$PURGE_DOWNLOADS" == "1" && -d "$DOWNLOAD_DIR" ]] && rm -rf "$DOWNLOAD_DIR"
+  fi
   echo "[DONE]"; exit 0
 fi
 
-# Fix bad apt source on host
+# ---------- Fix known bad apt source on host ----------
 echo "[*] Checking apt sources on host..."
 if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
   if ! apt-get update -o Dir::Etc::sourcelist="sources.list.d/google-chrome.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
@@ -152,11 +229,12 @@ fi
 apt-get update -y -qq || true
 apt-get install -y -qq curl dnsutils ca-certificates >/dev/null 2>&1 || true
 
-# Choices flow
+# ---------- Choices flow ----------
 fetch_choices() {
   echo "[*] Fetching choices: $CHOICES_URL"
   CHOICES_RAW="$(curl -fsSL "$CHOICES_URL" || true)"
   [[ -n "${CHOICES_RAW:-}" ]] || return 1
+  # Lines: ID|Name|URL (ignore comments/empties)
   echo "$CHOICES_RAW" | awk -F'|' 'BEGIN{OFS="|"} /^[[:space:]]*#/ {next} NF>=3 {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $1,$2,$3 }'
 }
 
@@ -201,19 +279,17 @@ if echo "$MT5_URL" | grep -qiE 'github\.com/.*/blob/'; then
   echo "❌ Error: GitHub 'blob' links are HTML pages. Use Releases or raw.githubusercontent.com URLs."; exit 1
 fi
 
-# Docker & dirs
+# ---------- Docker install/start ----------
 if ! command -v docker >/dev/null 2>&1; then
   echo "[+] Installing Docker..."
   apt-get update -qq && apt-get install -y -qq docker.io
-  systemctl enable docker; systemctl start docker
-else
-  echo "[=] Docker found."
 fi
+start_docker_daemon
 
 echo "[=] Using data dir: $DATA_DIR"
 echo "[=] Using download cache: $DOWNLOAD_DIR"
 
-# Safe sanitize and cache filename
+# Safe sanitize + cache filename
 sanitize() {
   LC_ALL=C printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
@@ -243,7 +319,7 @@ else
   echo "[=] Saved: $CACHED_PATH"
 fi
 
-# Choose image
+# ---------- Choose image (prebuilt -> fallback) ----------
 echo "[*] Trying prebuilt Wine image: ${PREFERRED_IMAGE}"
 if pull_with_retry "$PREFERRED_IMAGE"; then IMAGE="$PREFERRED_IMAGE"; else echo "[!] Prebuilt not available; using fallback."; IMAGE="$FALLBACK_IMAGE"; fi
 echo "[+] Using image: $IMAGE"
@@ -255,7 +331,7 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   docker rm -f "$CONTAINER_NAME" || true
 fi
 
-# Start
+# Start container
 echo "[+] Starting container..."
 docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   -p "${HTTP_PORT}:80" -p "${VNC_PORT}:5900" \
@@ -264,7 +340,7 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   --shm-size=2g "$IMAGE" >/dev/null
 sleep 4
 
-# Install Wine (fallback)
+# ---------- Install Wine (fallback image only) ----------
 if [[ "$IMAGE" == "$FALLBACK_IMAGE" ]]; then
   echo "[+] Installing Wine inside container (fallback image)..."
   docker exec -it "$CONTAINER_NAME" bash -lc "
@@ -281,7 +357,7 @@ else
   echo "[=] Wine already preinstalled."
 fi
 
-# Init wine
+# ---------- Initialize Wine prefix ----------
 echo "[=] Initializing Wine prefix..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
@@ -290,7 +366,7 @@ ln -sfn /config/wineprefix $WINEPREFIX_DIR || true
 WINEPREFIX=$WINEPREFIX_DIR winecfg >/dev/null 2>&1 || true
 "
 
-# Install MT5
+# ---------- Install MT5 + desktop ----------
 if [[ "$DEBUG_INSTALL" == "1" ]]; then
   echo "[=] DEBUG mode: creating desktop shortcut."
   docker exec -it "$CONTAINER_NAME" bash -lc "
@@ -345,7 +421,7 @@ Categories=Finance;
 EOF
 chmod +x /root/Desktop/MetaTrader5.desktop
 gio set /root/Desktop/MetaTrader5.desktop metadata::trusted true || true
-# Autostart + LXDE: auto-launch .desktop files
+# Autostart + ensure LXDE launches .desktop files
 mkdir -p /etc/xdg/lxsession/LXDE
 grep -q '/usr/local/bin/mt5' /etc/xdg/lxsession/LXDE/autostart 2>/dev/null || echo '@/usr/local/bin/mt5' >> /etc/xdg/lxsession/LXDE/autostart
 mkdir -p /root/.config/pcmanfm/LXDE
@@ -353,7 +429,7 @@ echo -e '[Desktop]\nlaunch_desktop_file=1' > /root/.config/pcmanfm/LXDE/pcmanfm.
 "
 fi
 
-# Detect IP & print
+# ---------- Detect public IP ----------
 detect_ip() {
   for svc in "https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com" "https://checkip.amazonaws.com"; do
     ip="$(curl -fsS $svc || true)"; ip="$(echo "$ip" | tr -d '[:space:]')"
@@ -366,6 +442,7 @@ detect_ip() {
 }
 PUBLIC_IP="$(detect_ip || true)"
 
+# ---------- Summary ----------
 echo
 echo "=============================================================="
 echo " Xquantify · www.xquantify.com"
@@ -388,7 +465,7 @@ fi
 echo
 echo " Uninstall:"
 echo "   sudo ./install_mt5_headless.sh --uninstall --yes"
-echo " Full purge:"
+echo " Full purge (everything created by this script):"
 echo "   sudo ./install_mt5_headless.sh --purge-all --yes"
 echo "=============================================================="
 echo "[DONE] Ready."
