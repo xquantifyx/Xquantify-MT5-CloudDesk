@@ -5,6 +5,20 @@ Author: **Xquantify** — https://www.xquantify.com — Telegram: @xquantify
 
 ---
 
+# 🚀 One-line Quick Install
+```bash
+curl -O https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh \
+  && chmod +x install_mt5_headless.sh \
+  && sudo BASE_DIR=/opt/xquantify-mt5 ./install_mt5_headless.sh
+```
+
+> After install, open:  
+> - **noVNC (browser):** `http://<VPS_IP>:6080`  
+> - **VNC client:** `<VPS_IP>:5901`  
+> - Password is shown in the summary at the end
+
+---
+
 ## ✨ Features
 - Clean defaults under **`/opt/xquantify-mt5`** (`data`, `download`, `logs`)
 - Choose installer via **`download/choices.txt`** or pass **`--mt5-url`**
@@ -12,8 +26,9 @@ Author: **Xquantify** — https://www.xquantify.com — Telegram: @xquantify
 - Optional **`--broker <name>`** — cache installers per broker (`mt5_<name>.exe`)
 - Pulls prebuilt image from GHCR (fast), falls back to base image + auto Wine install
 - Auto-fixes Chrome apt GPG repo issues (host + container)
-- Desktop shortcuts are **trusted** (no “execute text file?” dialog) and LXDE auto-launch is enabled
+- Desktop shortcuts are trusted-like: **pcmanfm/libfm configured to auto-exec** (no “execute text file?” dialog)
 - MT5 **autostarts** on desktop login
+- **Verbose uninstall output** (lists what will be removed)
 - Detailed end‑of‑install **summary** (VNC URL/ports/password, dirs, container)
 
 ---
@@ -66,6 +81,7 @@ sudo ./install_mt5_headless.sh --uninstall --yes
 # Full purge: container + data + downloads + images + BASE_DIR
 sudo ./install_mt5_headless.sh --purge-all --yes
 ```
+> During uninstall, the script prints *exactly* what is removed: container, images, each directory path, and a listing of contents before deletion.
 
 ---
 
@@ -93,8 +109,8 @@ sudo ufw allow 5901/tcp   # VNC
 
 ## 🩺 Troubleshooting
 - **GPG/Chrome apt errors**: script will auto‑disable the invalid repo on host & container.
-- **noVNC page opens but icon prompts “execute text file?”** → already handled by trusting `.desktop` via `gio` and LXDE config.
-- **Direct GitHub link downloads HTML** → you used a `blob` link. Use **raw.githubusercontent.com** or a **Releases** link.
+- **noVNC page opens but icon prompts “execute text file?”** → 已内置 `libfm/pcmanfm` 配置，双击不再弹窗。
+- **Direct GitHub link downloads HTML** → use **raw.githubusercontent.com** or a **Releases** link.
 
 ---
 
