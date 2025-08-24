@@ -7,7 +7,7 @@ Now includes a **download cache** and **broker presets** (MetaQuotes, Exness, IC
 
 ## 🚀 Quick Start
 ```bash
-curl -O https://raw.githubusercontent.com/<your-username>/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh
+curl -O https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh
 chmod +x install_mt5_headless.sh
 sudo ./install_mt5_headless.sh --vnc-pass "StrongVNCpass" --http-port 6080 --vnc-port 5901
 ```
