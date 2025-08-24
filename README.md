@@ -100,4 +100,4 @@ sudo ufw allow 5901/tcp   # VNC
 
 ## 🙌 Credits
 - Base desktop image: `dorowu/ubuntu-desktop-lxde-vnc:focal`
-- Maintained by **Xquantify** · https://www.xquantify.com · Telegram: @xquantify · GitHub: xquantifyx/Xquantify-MT5-CloudDesk
+- Maintained by **Xquantify** · https://www.xquantify.com · Telegram: https://t.me/xquantify · GitHub: xquantifyx/Xquantify-MT5-CloudDesk
