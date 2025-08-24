@@ -55,7 +55,7 @@ sudo usermod -aG docker $USER    # log out/in or run: newgrp docker
 
 ### 2) Clone & configure
 ```bash
-git clone https://github.com/<your-username>/Xquantify-MT5-Cloud-Desk.git
+git clone https://github.com/xquantifyx/Xquantify-MT5-Cloud-Desk.git
 cd Xquantify-MT5-Cloud-Desk
 cp .env.example .env
 nano .env    # set DOMAIN, ADMIN_EMAIL, DB_* as needed
