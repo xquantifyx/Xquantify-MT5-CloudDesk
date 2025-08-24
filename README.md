@@ -1,46 +1,44 @@
-# Xquantify-MT5-CloudDesk
+# Xquantify-MT5-CloudDesk (Turbo)
 
-Run **MetaTrader 5 (MT5)** headlessly on Ubuntu servers/VPS using **Docker + Wine + LXDE + noVNC**.  
-This simplified installer no longer needs broker presets — paste **any MT5 installer URL** or pass `--mt5-url`.
+**Fast & beginner-friendly** headless MT5 on Ubuntu with **Docker + Wine + LXDE + noVNC**.
 
-## 🚀 Quick Start
-
+### Quick Start
 ```bash
 curl -O https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/install_mt5_headless.sh
 chmod +x install_mt5_headless.sh
 sudo ./install_mt5_headless.sh
-# Paste your MT5 installer URL when prompted (e.g. Bybit):
-# https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe
+# Paste your MT5 installer URL when prompted (e.g. Bybit)
 ```
 
-### Non-interactive (CI / scripted)
+Non-interactive:
 ```bash
 sudo ./install_mt5_headless.sh --mt5-url "https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
 ```
 
-## 🔑 Defaults
-- Data dir: `~/mt5data`
-- Downloads cache: `~/mt5downloads` (file: `mt5_Custom.exe`)
-- noVNC: `http://<PUBLIC_IP>:6080`, VNC: `<PUBLIC_IP>:5901`
+### Why it's fast
+- Pulls a **prebuilt image** with Wine already installed (`ghcr.io/xquantifyx/mt5-clouddesk:latest`).
+- If unavailable, **auto-falls back** to base image and installs Wine inside the container.
+- Caches the MT5 installer at `~/mt5downloads/mt5_Custom.exe`.
 
-## 🧹 Uninstall / Cleanup
-
-Remove container only:
+### Debug install
 ```bash
-sudo ./install_mt5_headless.sh --uninstall --yes
+sudo ./install_mt5_headless.sh --mt5-url "<YOUR_URL>" --debug-install
+# Then visit http://<PUBLIC_IP>:6080 and double-click 'Install MT5 (Debug)'
 ```
 
-Full purge (container + data dir + downloads cache + image):
+### Uninstall
 ```bash
+# Container only
+sudo ./install_mt5_headless.sh --uninstall --yes
+
+# Full purge (container + data + downloads + image)
 sudo ./install_mt5_headless.sh --purge-all --yes
 ```
 
-Custom purge:
-```bash
-sudo ./install_mt5_headless.sh --uninstall --purge-data --purge-downloads --purge-images --yes
-```
+---
 
-## 📌 Author & Contact
-**Xquantify** · https://www.xquantify.com  
-GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk  
-Telegram: https://t.me/xquantify
+## Build & publish the prebuilt image (optional)
+- Commit `Dockerfile.prebuilt` and the workflow below.
+- GitHub Actions will build and push `ghcr.io/<your-org>/mt5-clouddesk:latest` on `main` changes.
+
+`.github/workflows/build-ghcr.yml` is included in this pack.
