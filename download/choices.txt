@@ -1,0 +1,4 @@
+# ID|Name|URL (every line = 3 fields separated by | ; lines starting with # are comments)
+bybit|Bybit MT5 (official CDN)|https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe
+backup|Backup MT5 (GitHub Release)|https://github.com/xquantifyx/Xquantify-MT5-CloudDesk/releases/download/v1.3.0/bybit5setup.exe
+custom1|My Broker MT5 (raw GitHub file)|https://raw.githubusercontent.com/xquantifyx/Xquantify-MT5-CloudDesk/main/download/mybroker_mt5.exe
