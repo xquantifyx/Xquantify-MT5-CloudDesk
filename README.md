@@ -1,209 +1,158 @@
+# 🚀 Xquantify-MT5-CloudDesk
 
-# 🚀 Xquantify‑MT5‑CloudDesk
-
-A production‑ready, Dockerized scaffold for running a FastAPI service behind an automatic HTTPS reverse proxy (Caddy).  
-Includes Postgres, `.env` config, GitHub Actions CI, and a step‑by‑step Ubuntu VPS guide.
-
----
-
-## Contents
-
-- `main.py` — Minimal FastAPI app (`/` and `/health`).
-- `Dockerfile` — Slim Python 3.11 image, non‑root user, cache‑friendly.
-- `docker-compose.yaml` — `app` + `db` + `caddy` (HTTPS) services.
-- `Caddyfile` — Reverse proxy & TLS via Let's Encrypt.
-- `.env.example` — Clear environment variables.
-- `.dockerignore` / `.gitignore` — Clean builds and repos.
-- `requirements.txt` — FastAPI, Uvicorn, etc.
-- `.github/workflows/ci.yml` — CI to build & lint on PRs.
-- `LICENSE.md` — MIT License.
+A production-ready, Dockerized scaffold for running a FastAPI service behind an automatic HTTPS reverse proxy (Caddy).  
+Includes PostgreSQL, `.env` config, GitHub Actions CI, and a full **installer/uninstaller script** for Ubuntu VPS.
 
 ---
 
-## Quick Start (Local)
+## 📦 Features
+
+- FastAPI app with `/` and `/health`
+- Dockerfile (Python 3.11 slim, cache-friendly, non-root user)
+- `docker-compose.yaml` with:
+  - `app` (FastAPI/Uvicorn)
+  - `db` (PostgreSQL 15)
+  - `caddy` (auto HTTPS via Let’s Encrypt)
+- `.env.example` for environment variables
+- `.dockerignore` / `.gitignore`
+- GitHub Actions CI workflow
+- MIT License
+- **Lifecycle script** (`xquantify_lifecycle.sh`) with:
+  - `install` (default)
+  - `uninstall` (remove app only)
+  - `purge` (dangerous: wipe Docker + firewall reset)
+
+---
+
+## 🚀 Quick Start (Local)
 
 ```bash
-# 1) Clone & enter
-git clone https://github.com/xquantifyx/Xquantify-MT5-CloudDesk.git
-cd Xquantify-MT5-CloudDesk
-
-# 2) Prepare env
+# Clone or unzip repo, then:
 cp .env.example .env
-# (Optional) edit .env to change APP_PORT or DB_*
-nano .env
+nano .env   # edit values (DB password, DOMAIN, etc.)
 
-# 3) Run (HTTP on localhost:8000; HTTPS via caddy requires a public domain)
-docker compose up --build
+docker compose up --build -d
 ```
 
 Visit:
 - App: http://localhost:8000/
 - Health: http://localhost:8000/health
 
-> If you don't have a domain locally, Caddy will still start but won't obtain certs. For local HTTPS you can map a test domain in `/etc/hosts` pointing to 127.0.0.1, but ACME will fail (not publicly reachable).
+---
+
+## ☁️ Deploy on Ubuntu VPS
+
+### 1. Upload or download repo
+```bash
+curl -L https://github.com/xquantifyx/Xquantify-MT5-CloudDesk/archive/refs/heads/main.zip -o project.zip
+unzip project.zip
+cd Xquantify-MT5-CloudDesk-main
+```
+
+### 2. Run lifecycle installer
+```bash
+chmod +x xquantify_lifecycle.sh
+sudo ./xquantify_lifecycle.sh install
+```
+
+- Installs Docker + Compose v2
+- Configures UFW firewall (SSH safe, HTTP/HTTPS open)
+- Downloads repo from ZIP
+- Creates `.env` if missing
+- Starts containers
+- Creates systemd unit `xquantify.service` for auto-start on reboot
 
 ---
 
-## Deploy on Ubuntu VPS (20.04/22.04/24.04)
+## ⚙️ Manage Lifecycle
 
-### 1) Install dependencies
+### Install (default)
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y git docker.io docker-compose ufw
-sudo usermod -aG docker $USER    # log out/in or run: newgrp docker
+sudo ./xquantify_lifecycle.sh install
 ```
 
-### 2) Clone & configure
+### Uninstall (remove only app)
 ```bash
-git clone https://github.com/xquantifyx/Xquantify-MT5-Cloud-Desk.git
-cd Xquantify-MT5-Cloud-Desk
-cp .env.example .env
-nano .env    # set DOMAIN, ADMIN_EMAIL, DB_* as needed
+sudo ./xquantify_lifecycle.sh uninstall
 ```
+- Stops containers
+- Removes app images/volumes
+- Deletes `/opt/Xquantify-MT5-CloudDesk`
+- Removes systemd unit
 
-**Important `.env` keys:**
+### Purge (⚠️ dangerous: full wipe)
+```bash
+sudo ./xquantify_lifecycle.sh purge
+```
+- Stops & removes **all Docker containers/images/volumes/networks (system-wide)**
+- Uninstalls Docker packages
+- Removes `/var/lib/docker` and `/var/lib/containerd`
+- Removes Docker apt repo & GPG key
+- Resets & disables UFW firewall
+- Deletes `/opt/Xquantify-MT5-CloudDesk` and systemd unit
+
+> You must type `PURGE` to confirm.
+
+---
+
+## 🔧 Service Management
+
+- Start app:
+  ```bash
+  sudo systemctl start xquantify
+  ```
+- Stop app:
+  ```bash
+  sudo systemctl stop xquantify
+  ```
+- Check status:
+  ```bash
+  sudo systemctl status xquantify --no-pager
+  ```
+- Logs:
+  ```bash
+  docker compose -f /opt/Xquantify-MT5-CloudDesk/docker-compose.yaml logs -f app
+  docker compose -f /opt/Xquantify-MT5-CloudDesk/docker-compose.yaml logs -f caddy
+  ```
+
+---
+
+## 🔑 Environment Variables (`.env`)
+
 ```env
-# App
 APP_ENV=production
 APP_PORT=8000
 
-# Domain & TLS
 DOMAIN=your.domain.com
 ADMIN_EMAIL=you@example.com
 
-# Database
 DB_USER=postgres
-DB_PASSWORD=secret
+DB_PASSWORD=ChangeMeStrong
 DB_NAME=xquantify
 DB_HOST=db
 DB_PORT=5432
 ```
 
-### 3) DNS
-Create an **A record** for `your.domain.com` pointing to your VPS public IP.
+---
 
-### 4) Open firewall
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-# Optional if you want direct app access (not needed in prod)
-sudo ufw allow 8000/tcp
-sudo ufw enable
-sudo ufw status
-```
+## 🧹 Uninstall Details
 
-### 5) Start services
-```bash
-docker compose up --build -d
-docker compose logs -f caddy   # watch for "certificate obtained"
-```
+`uninstall` mode removes:
+- Containers, images, and volumes **used by this stack**
+- App folder: `/opt/Xquantify-MT5-CloudDesk`
+- Systemd service: `/etc/systemd/system/xquantify.service`
 
-Visit:
-- **HTTPS**: https://your.domain.com/
-- Health: https://your.domain.com/health
-
-Caddy manages TLS automatically and renews certificates for you.
-
-### 6) Auto‑start on reboot (systemd)
-```bash
-sudo tee /etc/systemd/system/xquantify.service >/dev/null <<'EOF'
-[Unit]
-Description=Xquantify-MT5-CloudDesk (docker-compose)
-Requires=docker.service
-After=docker.service network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/home/<YOUR_USER>/Xquantify-MT5-Cloud-Desk
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable xquantify
-sudo systemctl start xquantify
-sudo systemctl status xquantify --no-pager
-```
-> Replace `<YOUR_USER>` and adjust the path if different.
+`purge` mode removes:
+- **All Docker** containers/images/volumes/networks
+- Docker packages, repo, keys
+- `/var/lib/docker`, `/var/lib/containerd`
+- Resets + disables UFW firewall
+- App folder + systemd service
 
 ---
 
-## Development
+## 📝 License
 
-- Live logs:
-  ```bash
-  docker compose logs -f app
-  docker compose logs -f db
-  docker compose logs -f caddy
-  ```
-- Rebuild after code changes:
-  ```bash
-  docker compose up --build -d
-  ```
-- Exec into container:
-  ```bash
-  docker compose exec app bash
-  ```
+MIT — see [LICENSE.md](LICENSE.md)
 
 ---
-
-## Security / Production Tips
-
-- In production, **remove** the `app` port mapping from `docker-compose.yaml` so traffic only passes through Caddy.
-- Use strong DB credentials in `.env`.
-- Keep your system & Docker images up to date:
-  ```bash
-  docker compose pull && docker compose up -d
-  ```
-- Backups: mount a volume for Postgres (`postgres_data`) and snapshot it regularly.
-
----
-
-## Troubleshooting
-
-- **Cannot reach site over HTTPS**: 
-  - DNS A record not pointing to the VPS yet (propagation can take a few minutes).
-  - Port 80/443 blocked: check `ufw status` and your cloud provider’s firewall.
-- **`permission denied` with Docker**:
-  - Log out/in after `usermod -aG docker $USER` (or `newgrp docker`).
-- **Port already in use**:
-  - Change `APP_PORT` in `.env` and restart.
-- **Caddy cert errors**:
-  - Ensure your domain resolves publicly to your VPS IP and port 80 is reachable for HTTP‑01 challenge.
-- **Recreate everything cleanly**:
-  ```bash
-  docker compose down -v
-  docker compose up --build -d
-  ```
-
----
-
-## File Tree
-
-```
-.
-├── Caddyfile
-├── Dockerfile
-├── docker-compose.yaml
-├── main.py
-├── requirements.txt
-├── .env.example
-├── .dockerignore
-├── .gitignore
-├── README.md
-├── LICENSE.md
-└── .github/
-    └── workflows/
-        └── ci.yml
-```
-
----
-
-## License
-
-MIT — see `LICENSE.md`.
