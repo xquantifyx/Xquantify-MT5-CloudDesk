@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
 # Xquantify-MT5-CloudDesk (Simple) · Headless MT5 on Ubuntu (Docker + noVNC + Wine)
-# Author: Xquantify (www.xquantify.com) · Telegram: @xquantify
+# Author: Xquantify (www.xquantify.com) · Telegram: @xquantify · GitHub: https://github.com/xquantifyx/Xquantify-MT5-CloudDesk
 # Simplified: no --broker presets. Accepts --mt5-url or prompts user to paste URL.
 # Adds: Full uninstall flags.
 # Caches installer under ~/mt5downloads/mt5_Custom.exe
@@ -28,7 +28,7 @@ ASSUME_YES="0"
 
 # Inside container
 WINEPREFIX_DIR="/root/.wine"
-MT5_EXE_WIN='C:\Program Files\MetaTrader 5\terminal64.exe'
+MT5_EXE_WIN='C:\\Program Files\\MetaTrader 5\\terminal64.exe'
 MT5_SETUP_PATH="/root/mt5setup.exe"
 
 show_help() {
@@ -37,7 +37,7 @@ Xquantify-MT5-CloudDesk (Simple)
 Run MT5 headlessly with Docker+Wine+noVNC. Paste your MT5 installer URL or pass --mt5-url.
 
 Usage:
-  sudo ./install_mt5_headless.sh [options]
+  sudo ./install_mt5_headless_simple.sh [options]
 
 Install options:
   --http-port <port>         noVNC (browser) port (default: 6080)
@@ -47,7 +47,7 @@ Install options:
   --download-dir <dir>       Host download cache dir (default: ~/mt5downloads)
   --name <container>         Container name (default: mt5)
   --image <image>            Docker image (default: dorowu/ubuntu-desktop-lxde-vnc:focal)
-  --mt5-url <url>            MT5 installer URL (if omitted, script will prompt)
+  --mt5-url <url>            MT5 installer URL (if omitted, script prompts)
 
 Uninstall options:
   --uninstall                Stop & remove container only
@@ -58,9 +58,9 @@ Uninstall options:
   --yes                      Non-interactive (assume yes to prompts)
 
 Examples:
-  sudo ./install_mt5_headless.sh
-  sudo ./install_mt5_headless.sh --mt5-url "https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
-  sudo ./install_mt5_headless.sh --uninstall --purge-all --yes
+  sudo ./install_mt5_headless_simple.sh
+  sudo ./install_mt5_headless_simple.sh --mt5-url "https://download.metatrader.com/cdn/web/infra.capital.limited/mt5/bybit5setup.exe"
+  sudo ./install_mt5_headless_simple.sh --uninstall --purge-all --yes
 EOF
 }
 
@@ -95,7 +95,7 @@ echo "DATA_DIR:      $DATA_DIR"
 echo "DOWNLOAD_DIR:  $DOWNLOAD_DIR"
 echo "NAME:          $CONTAINER_NAME"
 echo "IMAGE:         $IMAGE"
-if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then echo "MODE:          UNINSTALL"; fi
+if [[ "$UNINSTALL" == "1" ]]; then echo "MODE:          UNINSTALL"; fi
 echo "====================================="
 
 # ===== Helper: prompt yes/no ================================================
@@ -112,7 +112,7 @@ confirm() {
 if [[ "$UNINSTALL" == "1" || "$PURGE_ALL" == "1" ]]; then
   # Decide purges
   if [[ "$PURGE_ALL" == "1" ]]; then
-    PURGE_DATA="1"; PURGE_DOWNLOADS="1"; PURGE_IMAGES="1"; ASSUME_YES="1"
+    PURGE_DATA="1"; PURGE_DOWNLOADS="1"; PURGE_IMAGES="1"; ASSUME_YES="${ASSUME_YES:-1}"
   fi
 
   echo "[*] Uninstalling Xquantify-MT5-CloudDesk..."
@@ -223,17 +223,7 @@ fi
 
 # Start container (mount data + downloads)
 echo "[+] Starting container..."
-docker run -d \
-  --name "$CONTAINER_NAME" \
-  --restart unless-stopped \
-  -p "${HTTP_PORT}:80" \
-  -p "${VNC_PORT}:5900" \
-  -e VNC_PASSWORD="${VNC_PASS}" \
-  -e RESOLUTION="1600x900" \
-  -v "${DATA_DIR}:/config" \
-  -v "${DOWNLOAD_DIR}:/downloads:ro" \
-  --shm-size=2g \
-  "$IMAGE" >/dev/null
+docker run -d       --name "$CONTAINER_NAME"       --restart unless-stopped       -p "${HTTP_PORT}:80"       -p "${VNC_PORT}:5900"       -e VNC_PASSWORD="${VNC_PASS}"       -e RESOLUTION="1600x900"       -v "${DATA_DIR}:/config"       -v "${DOWNLOAD_DIR}:/downloads:ro"       --shm-size=2g       "$IMAGE" >/dev/null
 
 sleep 5
 
@@ -243,9 +233,7 @@ docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
 dpkg --add-architecture i386
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  wine64 wine32 winbind cabextract wget xvfb xauth x11-xserver-utils winetricks \
-  ca-certificates fonts-wqy-zenhei fonts-noto-cjk
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends       wine64 wine32 winbind cabextract wget xvfb xauth x11-xserver-utils winetricks       ca-certificates fonts-wqy-zenhei fonts-noto-cjk
 "
 
 # Init Wine prefix
@@ -253,8 +241,8 @@ echo "[=] Initializing Wine prefix..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
 mkdir -p /config/wineprefix
-ln -sfn /config/wineprefix $WINEPREFIX_DIR || true
-WINEPREFIX=$WINEPREFIX_DIR winecfg >/dev/null 2>&1 || true
+ln -sfn /config/wineprefix /root/.wine || true
+WINEPREFIX=/root/.wine winecfg >/dev/null 2>&1 || true
 "
 
 # Install MT5 from cached installer
@@ -262,7 +250,7 @@ echo "[=] Installing MT5 from cached installer..."
 docker exec -it "$CONTAINER_NAME" bash -lc "
 set -e
 cp '/downloads/${INSTALLER_NAME}' '$MT5_SETUP_PATH'
-WINEPREFIX=$WINEPREFIX_DIR wine '$MT5_SETUP_PATH' /silent || true
+WINEPREFIX=/root/.wine wine '$MT5_SETUP_PATH' /silent || true
 "
 
 # Launcher, desktop icon, autostart
@@ -297,11 +285,7 @@ grep -q '/usr/local/bin/mt5' $AUTOSTART 2>/dev/null || echo '@/usr/local/bin/mt5
 
 # Detect public IP & print URLs
 detect_ip() {
-  for svc in \
-    "https://api.ipify.org" \
-    "https://ifconfig.me" \
-    "https://icanhazip.com" \
-    "https://checkip.amazonaws.com"
+  for svc in         "https://api.ipify.org"         "https://ifconfig.me"         "https://icanhazip.com"         "https://checkip.amazonaws.com"
   do
     ip="$(curl -fsS $svc || true)"
     ip="$(echo "$ip" | tr -d '[:space:]')"
