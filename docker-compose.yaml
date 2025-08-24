@@ -1,0 +1,65 @@
+
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: xquantify_app
+    env_file: .env
+    command: uvicorn main:app --host 0.0.0.0 --port ${APP_PORT:-8000} --workers 2
+    # In production you can remove this port mapping to force all traffic through Caddy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    restart: unless-stopped
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+    networks:
+      - web
+
+  db:
+    image: postgres:15
+    container_name: xquantify_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - web
+
+  caddy:
+    image: caddy:2.8
+    container_name: xquantify_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - EMAIL=${ADMIN_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - web
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web:
+    driver: bridge
